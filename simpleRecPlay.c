@@ -26,6 +26,7 @@
 #include <math.h>
 #include <complex.h>
 #include "fft/fft.h"
+#include <SDL_stdinc.h>
 
 #define MONO 1 					/* Sample and play in mono (1 channel) */
 #define SAMP_FREQ 44100			/* Sampling frequency used by audio device */
@@ -112,7 +113,7 @@ void printSamplesU8(uint8_t * buffer, int size) {
 	}		
 }
 
-/* ***********************************************
+/* ********************************	***************
  * Debug function: 
  *       Prints the buffer contents - uint16 samples * 
  * **********************************************/
