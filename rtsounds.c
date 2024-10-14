@@ -1,7 +1,5 @@
-
-
-
 #define _GNU_SOURCE             /* Must precede #include <sched.h> for sched_setaffinity */ 
+#define __USE_MISC
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,14 +14,12 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <math.h>
+#include "fft/fft.h"
 
 /* ***********************************************
 * App specific defines
 * ***********************************************/
 #define NS_IN_SEC 1000000000L
-
-#define PERIOD_NS (0) 	// Period (ns component)
-#define PERIOD_S (1)				// Period (seconds component)
 
 #define DEFAULT_PRIO 50				// Default (fixed) thread priority  
 
@@ -33,13 +29,13 @@
 * Prototypes
 * ***********************************************/
 typedef struct {
-    uint8_t * const buffer;
+    uint32_t * const buffer;
     int head;
     int tail;
     const int maxlen;
 } cab_buf;
-int cab_buf_push(cab_buf *c, uint8_t data);
-int cab_buf_pop(cab_buf *c, uint8_t *data);
+int cab_buf_push(cab_buf *c, uint32_t data);
+int cab_buf_pop(cab_buf *c, uint32_t *data);
 
 struct  timespec TsAdd(struct  timespec  ts1, struct  timespec  ts2);
 struct  timespec TsSub(struct  timespec  ts1, struct  timespec  ts2);
@@ -47,27 +43,50 @@ struct  timespec TsSub(struct  timespec  ts1, struct  timespec  ts2);
 /* ***********************************************
 * Global variables
 * ***********************************************/
-
+uint32_t cab_data[200];      // change size if necessary
+cab_buf cab = {
+    .buffer = cab_data,
+    .head = 0,
+    .tail = 0,
+    .maxlen = 200
+};
 
 /* *************************
-* Thread_1 code 
+* Speed detection thread
 * **************************/
 void* Thread_1_code(void* arg)
 {
+    
 }
 
 
 /* *************************
-* Thread_2 code 
+* Issue detection thread
 * **************************/
 void* Thread_2_code(void* arg) {
 }
 
 
 /* *************************
-* Thread_3 code 
+* Direction detection thread
 * **************************/
 void* Thread_3_code(void* arg)
+{
+
+}
+
+/* *************************
+* RT values display thread
+* **************************/
+void* Thread_4_code(void* arg)
+{
+
+}
+
+/* *************************
+* FFT thread
+* **************************/
+void* Thread_5_code(void* arg)
 {
 
 }
@@ -107,7 +126,7 @@ struct  timespec  TsSub (struct  timespec  ts1, struct  timespec  ts2) {
   // Subtract second arg from first one 
   if ((ts1.tv_sec < ts2.tv_sec) || ((ts1.tv_sec == ts2.tv_sec) && (ts1.tv_nsec <= ts2.tv_nsec))) {
 	// Result would be negative. Return 0
-	tr.tv_sec = tr.tv_nsec = 0 ;  
+	tr.tv_sec = tr.tv_nsec = 0;  
   } else {						
 	// If T1 > T2, proceed 
 		tr.tv_sec = ts1.tv_sec - ts2.tv_sec ;
@@ -122,7 +141,8 @@ struct  timespec  TsSub (struct  timespec  ts1, struct  timespec  ts2) {
 	return (tr) ;
 }
 
-int cab_buf_push(cab_buf *c, uint8_t data)
+/* cab push || overwrites old information*/
+int cab_buf_push(cab_buf *c, uint32_t data)
 {
     int next;
 
@@ -130,15 +150,20 @@ int cab_buf_push(cab_buf *c, uint8_t data)
     if (next >= c->maxlen)
         next = 0;
 
-    if (next == c->tail)
-        return -1;
+    // buffer full -> discard tail
+    if (next == c->tail) {
+        int aux = c->tail + 1;
+        if (aux >= c->maxlen)
+            aux = 0;
+        c->tail = aux;
+    }   
 
     c->buffer[c->head] = data;
     c->head = next;
     return 0;
 }
 
-int cab_buf_pop(cab_buf *c, uint8_t *data)
+int cab_buf_pop(cab_buf *c, uint32_t *data)
 {
     int next;
 
@@ -153,5 +178,3 @@ int cab_buf_pop(cab_buf *c, uint8_t *data)
     c->tail = next;
     return 0;
 }
-
-

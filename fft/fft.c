@@ -9,6 +9,7 @@
 
 #ifndef FFT_H
 #define FFT_H
+#define __USE_MISC
 
 #include <stdio.h>
 #include <math.h>
