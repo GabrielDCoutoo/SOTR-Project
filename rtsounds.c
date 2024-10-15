@@ -15,6 +15,7 @@
 #include <sys/mman.h>
 #include <math.h>
 #include "fft/fft.h"
+#include "simpleRecPlay.c"
 
 /* ***********************************************
 * App specific defines
@@ -22,6 +23,7 @@
 #define NS_IN_SEC 1000000000L
 
 #define DEFAULT_PRIO 50				// Default (fixed) thread priority  
+#define BUF_SIZE 4096
 
 #define THREAD_INIT_OFFSET 1000000	// Initial offset (i.e. delay) of rt thread
 
@@ -29,13 +31,13 @@
 * Prototypes
 * ***********************************************/
 typedef struct {
-    uint32_t * const buffer;
+    uint8_t * const buffer;
     int head;
     int tail;
     const int maxlen;
 } cab_buf;
-int cab_buf_push(cab_buf *c, uint32_t data);
-int cab_buf_pop(cab_buf *c, uint32_t *data);
+int cab_buf_push(cab_buf *c, uint8_t data);
+int cab_buf_pop(cab_buf *c, uint8_t *data);
 
 struct  timespec TsAdd(struct  timespec  ts1, struct  timespec  ts2);
 struct  timespec TsSub(struct  timespec  ts1, struct  timespec  ts2);
@@ -43,18 +45,25 @@ struct  timespec TsSub(struct  timespec  ts1, struct  timespec  ts2);
 /* ***********************************************
 * Global variables
 * ***********************************************/
-uint32_t cab_data[200];      // change size if necessary
+uint8_t cab_data[BUF_SIZE];      // change size if necessary
 cab_buf cab = {
     .buffer = cab_data,
     .head = 0,
     .tail = 0,
-    .maxlen = 200
+    .maxlen = BUF_SIZE
 };
+
+/* *************************
+* Audio recording / LP filter thread
+* **************************/
+void* Audio_thread(void* arg)
+{
+}
 
 /* *************************
 * Speed detection thread
 * **************************/
-void* Thread_1_code(void* arg)
+void* Speed_thread(void* arg)
 {
     
 }
@@ -63,14 +72,14 @@ void* Thread_1_code(void* arg)
 /* *************************
 * Issue detection thread
 * **************************/
-void* Thread_2_code(void* arg) {
+void* Issue_thread(void* arg) {
 }
 
 
 /* *************************
 * Direction detection thread
 * **************************/
-void* Thread_3_code(void* arg)
+void* Direction_thread(void* arg)
 {
 
 }
@@ -78,7 +87,7 @@ void* Thread_3_code(void* arg)
 /* *************************
 * RT values display thread
 * **************************/
-void* Thread_4_code(void* arg)
+void* Display_thread(void* arg)
 {
 
 }
@@ -86,16 +95,113 @@ void* Thread_4_code(void* arg)
 /* *************************
 * FFT thread
 * **************************/
-void* Thread_5_code(void* arg)
+void* FFT_thread(void* arg)
 {
 
 }
+
 
 /* *************************
 * main()
 * **************************/
 int main(int argc, char *argv[]) {
+    // General vars
+    int err;
+    unsigned char* procname1 = "AudioThread";
+	unsigned char* procname2 = "SpeedThread";
+	unsigned char* procname3 = "IssueThread";
+    unsigned char* procname4 = "DirectionThread";
+	unsigned char* procname5 = "DisplayThread";
+	unsigned char* procname6 = "FFTThread";
 
+    // Initialize CABs
+
+    pthread_t thread1, thread2, thread3, thread4, thread5, thread6;
+	struct sched_param parm1, parm2, parm3, parm4, parm5, parm6; 
+	pthread_attr_t attr1, attr2, attr3, attr4, attr5, attr6;
+	cpu_set_t cpuset_test; // To check process affinity
+
+    // Initialize threads; change priority later
+    pthread_attr_init(&attr1);
+	pthread_attr_setinheritsched(&attr1, PTHREAD_EXPLICIT_SCHED);
+	pthread_attr_setschedpolicy(&attr1, SCHED_FIFO);
+    parm1.sched_priority = DEFAULT_PRIO;
+    pthread_attr_setschedparam(&attr1, &parm1);
+
+    pthread_attr_init(&attr2);
+	pthread_attr_setinheritsched(&attr2, PTHREAD_EXPLICIT_SCHED);
+	pthread_attr_setschedpolicy(&attr2, SCHED_FIFO);
+    parm2.sched_priority = DEFAULT_PRIO;
+    pthread_attr_setschedparam(&attr2, &parm2);
+
+    pthread_attr_init(&attr3);
+	pthread_attr_setinheritsched(&attr3, PTHREAD_EXPLICIT_SCHED);
+	pthread_attr_setschedpolicy(&attr3, SCHED_FIFO);
+    parm3.sched_priority = DEFAULT_PRIO;
+    pthread_attr_setschedparam(&attr3, &parm3);
+
+    pthread_attr_init(&attr4);
+	pthread_attr_setinheritsched(&attr4, PTHREAD_EXPLICIT_SCHED);
+	pthread_attr_setschedpolicy(&attr4, SCHED_FIFO);
+    parm4.sched_priority = DEFAULT_PRIO;
+    pthread_attr_setschedparam(&attr4, &parm4);
+
+    pthread_attr_init(&attr5);
+	pthread_attr_setinheritsched(&attr5, PTHREAD_EXPLICIT_SCHED);
+	pthread_attr_setschedpolicy(&attr5, SCHED_FIFO);
+    parm5.sched_priority = DEFAULT_PRIO;
+    pthread_attr_setschedparam(&attr5, &parm5);
+
+    pthread_attr_init(&attr6);
+	pthread_attr_setinheritsched(&attr6, PTHREAD_EXPLICIT_SCHED);
+	pthread_attr_setschedpolicy(&attr6, SCHED_FIFO);
+    parm6.sched_priority = DEFAULT_PRIO;
+    pthread_attr_setschedparam(&attr6, &parm6);
+
+    /* Lock memory */
+	mlockall(MCL_CURRENT | MCL_FUTURE);
+
+    err=pthread_create(&thread1, &attr1, Audio_thread, &procname1);
+	if(err != 0) {
+		printf("\n\r Error creating Thread [%s]", strerror(err));
+		return 1;
+	}
+
+	err=pthread_create(&thread2, &attr2, Speed_thread, &procname2);
+	if(err != 0) {
+		printf("\n\r Error creating Thread [%s]", strerror(err));
+		return 1;
+	}
+
+	err=pthread_create(&thread3, &attr3, Issue_thread, &procname3);
+	if(err != 0) {
+		printf("\n\r Error creating Thread [%s]", strerror(err));
+		return 1;
+	}
+
+    err=pthread_create(&thread4, &attr4, Direction_thread, &procname4);
+	if(err != 0) {
+		printf("\n\r Error creating Thread [%s]", strerror(err));
+		return 1;
+	}
+
+	err=pthread_create(&thread5, &attr5, Display_thread, &procname5);
+	if(err != 0) {
+		printf("\n\r Error creating Thread [%s]", strerror(err));
+		return 1;
+	}
+
+	err=pthread_create(&thread6, &attr6, FFT_thread, &procname6);
+	if(err != 0) {
+		printf("\n\r Error creating Thread [%s]", strerror(err));
+		return 1;
+	}
+
+
+
+    while(1) {
+        
+    }
 }
 
 /* ***********************************************
@@ -142,7 +248,7 @@ struct  timespec  TsSub (struct  timespec  ts1, struct  timespec  ts2) {
 }
 
 /* cab push || overwrites old information*/
-int cab_buf_push(cab_buf *c, uint32_t data)
+int cab_buf_push(cab_buf *c, uint8_t data)
 {
     int next;
 
@@ -163,7 +269,7 @@ int cab_buf_push(cab_buf *c, uint32_t data)
     return 0;
 }
 
-int cab_buf_pop(cab_buf *c, uint32_t *data)
+int cab_buf_pop(cab_buf *c, uint8_t *data)
 {
     int next;
 
@@ -177,4 +283,27 @@ int cab_buf_pop(cab_buf *c, uint32_t *data)
     *data = c->buffer[c->tail];
     c->tail = next;
     return 0;
+}
+
+// Copies data from audio stream to circular buffer
+void audioRecordingCallback(void* userdata, Uint8* stream, int len )
+{
+    int space;
+    if (cab.tail > cab.head)
+        space = cab.tail - cab.head;
+    else
+        space = cab.maxlen - cab.head + cab.tail;
+
+    if (len > space) {
+        cab.tail = (cab.tail + len - space) % cab.maxlen;
+    }
+
+    int newWritePos = (cab.head + len) % cab.maxlen;
+    if (cab.head + len > cab.maxlen) {
+        memcpy(cab.buffer[cab.head], stream, cab.maxlen - cab.head);
+        cab.head = 0;
+    }
+
+    memcpy(cab.buffer[cab.head], stream, newWritePos-cab.head);
+    cab.head = newWritePos;
 }
