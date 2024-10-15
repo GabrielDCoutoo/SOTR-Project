@@ -24,6 +24,7 @@
 
 #define DEFAULT_PRIO 50				// Default (fixed) thread priority  
 #define BUF_SIZE 4096
+#define NTASKS 6
 
 #define THREAD_INIT_OFFSET 1000000	// Initial offset (i.e. delay) of rt thread
 
@@ -31,13 +32,14 @@
 * Prototypes
 * ***********************************************/
 typedef struct {
-    uint8_t * const buffer;
-    int head;
-    int tail;
-    const int maxlen;
-} cab_buf;
-int cab_buf_push(cab_buf *c, uint8_t data);
-int cab_buf_pop(cab_buf *c, uint8_t *data);
+    buffer buflist[NTASKS+1];
+    uint8_t last_write;
+} cab;
+
+typedef struct {
+    uint16_t buf[BUF_SIZE];
+    uint8_t nusers;
+} buffer;
 
 struct  timespec TsAdd(struct  timespec  ts1, struct  timespec  ts2);
 struct  timespec TsSub(struct  timespec  ts1, struct  timespec  ts2);
@@ -45,13 +47,6 @@ struct  timespec TsSub(struct  timespec  ts1, struct  timespec  ts2);
 /* ***********************************************
 * Global variables
 * ***********************************************/
-uint8_t cab_data[BUF_SIZE];      // change size if necessary
-cab_buf cab = {
-    .buffer = cab_data,
-    .head = 0,
-    .tail = 0,
-    .maxlen = BUF_SIZE
-};
 
 /* *************************
 * Audio recording / LP filter thread
@@ -115,6 +110,7 @@ int main(int argc, char *argv[]) {
 	unsigned char* procname6 = "FFTThread";
 
     // Initialize CABs
+
 
     pthread_t thread1, thread2, thread3, thread4, thread5, thread6;
 	struct sched_param parm1, parm2, parm3, parm4, parm5, parm6; 
@@ -247,46 +243,29 @@ struct  timespec  TsSub (struct  timespec  ts1, struct  timespec  ts2) {
 	return (tr) ;
 }
 
-/* cab push || overwrites old information*/
-int cab_buf_push(cab_buf *c, uint8_t data)
-{
-    int next;
-
-    next = c->head + 1;
-    if (next >= c->maxlen)
-        next = 0;
-
-    // buffer full -> discard tail
-    if (next == c->tail) {
-        int aux = c->tail + 1;
-        if (aux >= c->maxlen)
-            aux = 0;
-        c->tail = aux;
-    }   
-
-    c->buffer[c->head] = data;
-    c->head = next;
-    return 0;
+buffer cab_getWriteBuffer(cab* c) {
+    for (int i = 0; i < NTASKS+1; i++) {
+        if (c->buflist[i]->nusers == 0) {
+            return c->buflist[i];
+        }
+    }
 }
 
-int cab_buf_pop(cab_buf *c, uint8_t *data)
-{
-    int next;
+buffer cab_getReadBuffer(cab* c) {
+    c->buflist[c->last_write]->nusers += 1;
+    return c->buflist[c->last_write];
+}
 
-    if (c->head == c->tail)
-        return -1;
+void cab_releaseWriteBuffer(cab* c, uint8_t index) {
+    c->last_write = index;
+}
 
-    next = c->tail + 1;
-    if(next >= c->maxlen)
-        next = 0;
-
-    *data = c->buffer[c->tail];
-    c->tail = next;
-    return 0;
+void cab_releaseReadBuffer(cab* c, uint8_t index) {
+    c->buflist[index]->nusers--;
 }
 
 // Copies data from audio stream to circular buffer
-void audioRecordingCallback(void* userdata, Uint8* stream, int len )
+void audioRecordingCallback(void* userdata, uint16_t* stream, int len )
 {
     int space;
     if (cab.tail > cab.head)
@@ -306,4 +285,8 @@ void audioRecordingCallback(void* userdata, Uint8* stream, int len )
 
     memcpy(cab.buffer[cab.head], stream, newWritePos-cab.head);
     cab.head = newWritePos;
+}
+
+void usage(int argc, char* argv[]) {
+    printf("Usage: ./rtsounds [-prio LPPrio SpeedPrio IssuePrio DirectionPrio DisplayPrio RTPrio]\n[-period LPP SpeedP IssueP DirectionP DisplayP RTP]\n");
 }
