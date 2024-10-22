@@ -6,8 +6,8 @@ LDFLAGS = $(shell $(SDL2_CONFIG) --libs)
 LDFLAGS += -lm  
 CFLAGS += -g
 
-TARGET = simpleRecPlay
-OBJECTS = simpleRecPlay.o ./fft/fft.o
+TARGET = rtsounds
+OBJECTS = rtsounds.o ./fft/fft.o
 
 CC=gcc
 
