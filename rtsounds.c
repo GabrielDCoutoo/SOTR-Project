@@ -76,7 +76,61 @@ void* Audio_thread(void* arg)
 * **************************/
 void* Speed_thread(void* arg)
 {
+     printf("Speed detection thread running\n");
     
+    // Assuming the buffer is already filled with audio data.
+    uint16_t * sampleVector = (uint16_t *)gRecordingBuffer; // Use the recording buffer as sample input
+    int N = 0;  // Number of samples
+    int sampleDurationMS = 100;  // Duration to analyze (100ms)
+    float *fk;  // Array of frequencies
+    float *Ak;  // Array of amplitudes for each frequency
+    complex double *x;  // Array of complex values (samples and FFT output)
+    
+    // Get the size for N (power of two)
+    for(N=1; pow(2,N) < (SAMP_FREQ*sampleDurationMS)/1000; N++);
+    N--;
+    N = (int)pow(2,N);  // Ensure N is a power of 2 for FFT
+    
+    printf("Number of samples is: %d\n", N);
+    
+    // Allocate memory for FFT
+    x = (complex double *)malloc(N * sizeof(complex double));
+    fk = (float *)malloc(N * sizeof(float));
+    Ak = (float *)malloc(N * sizeof(float));
+    
+    // Copy the samples to complex input vector
+    for (int k = 0; k < N; k++) {
+        x[k] = sampleVector[k];  // Copy real part only
+    }
+    
+    // Compute the FFT
+    fftCompute(x, N);
+    
+    // Get the amplitude for each frequency
+    fftGetAmplitude(x, N, SAMP_FREQ, fk, Ak);
+    
+    // Find the most powerful frequency between 2 kHz and 5 kHz
+    float maxAmplitude = 0;
+    float detectedFrequency = 0;
+    
+    for (int k = 0; k <= N/2; k++) {
+        if (fk[k] >= 2000 && fk[k] <= 5000) {
+            if (Ak[k] > maxAmplitude) {
+                maxAmplitude = Ak[k];
+                detectedFrequency = fk[k];
+            }
+        }
+    }
+    
+    printf("Detected speed frequency: %f Hz\n", detectedFrequency);
+    
+    // Free resources
+    free(x);
+    free(fk);
+    free(Ak);
+    
+    return NULL;
+
 }
 
 
@@ -84,8 +138,63 @@ void* Speed_thread(void* arg)
 * Issue detection thread
 * **************************/
 void* Issue_thread(void* arg) {
-}
 
+	printf("Issue detection thread running\n");
+    
+    uint16_t * sampleVector = (uint16_t *)gRecordingBuffer;  // Use recording buffer
+    int N = 0;  // Number of samples
+    int sampleDurationMS = 100;  // Duration of the sample in ms
+    float *fk;  // Frequencies
+    float *Ak;  // Amplitudes
+    complex double *x;  // Complex array for FFT
+    
+    // Get the size for N (power of two)
+    for(N=1; pow(2,N) < (SAMP_FREQ*sampleDurationMS)/1000; N++);
+    N--;
+    N = (int)pow(2,N);
+    
+    printf("Number of samples for issue detection: %d\n", N);
+    
+    // Allocate memory
+    x = (complex double *)malloc(N * sizeof(complex double));
+    fk = (float *)malloc(N * sizeof(float));
+    Ak = (float *)malloc(N * sizeof(float));
+    
+    // Copy the samples to complex input vector
+    for (int k = 0; k < N; k++) {
+        x[k] = sampleVector[k];  // Real part only
+    }
+    
+    // Compute FFT
+    fftCompute(x, N);
+    
+    // Get amplitude for each frequency
+    fftGetAmplitude(x, N, SAMP_FREQ, fk, Ak);
+    
+    // Find the peak frequency and amplitude
+    float maxAmplitude = 0;
+    float peakFrequency = 0;
+    for (int k = 0; k <= N/2; k++) {
+        if (Ak[k] > maxAmplitude) {
+            maxAmplitude = Ak[k];
+            peakFrequency = fk[k];
+        }
+    }
+    
+    // Check for low-frequency components (<200 Hz) with amplitude > 20% of peak
+    for (int k = 0; k <= N/2; k++) {
+        if (fk[k] < 200 && Ak[k] > 0.2 * maxAmplitude) {
+            printf("Potential bearing issue detected at frequency: %f Hz with amplitude: %f\n", fk[k], Ak[k]);
+        }
+    }
+    
+    // Free resources
+    free(x);
+    free(fk);
+    free(Ak);
+    
+    return NULL;
+}
 
 /* *************************
 * Direction detection thread
