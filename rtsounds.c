@@ -209,7 +209,22 @@ void* Direction_thread(void* arg)
 * **************************/
 void* Display_thread(void* arg)
 {
+	printf("Displaying real-time values...\n");
 
+    while (1) {
+        // Just for example, print the detected speed and potential issues
+        // These variables need to be set by the other threads and made globally accessible
+
+        extern float detectedSpeedFrequency;  
+        extern float maxAmplitudeDetected;    
+
+        printf("Detected speed frequency: %f Hz\n", detectedSpeedFrequency);
+        printf("Max amplitude (for issues): %f\n", maxAmplitudeDetected);
+
+        sleep(1);  // Adjust based on how often you want to update the display
+    }
+
+    return NULL;
 }
 
 /* *************************
@@ -217,7 +232,49 @@ void* Display_thread(void* arg)
 * **************************/
 void* FFT_thread(void* arg)
 {
+	printf("FFT thread running\n");
 
+    while (1) {
+        uint16_t * sampleVector = (uint16_t *)gRecordingBuffer;  // Use your audio buffer
+        int N = 0;  // Number of samples
+        int sampleDurationMS = 100;  // Sample duration (e.g., 100 ms)
+        float *fk;  // Frequencies array
+        float *Ak;  // Amplitudes array
+        complex double *x;  // FFT complex array
+
+        // Ensure N is a power of two
+        for(N=1; pow(2,N) < (SAMP_FREQ*sampleDurationMS)/1000; N++);
+        N--;
+        N = (int)pow(2,N);
+
+        // Allocate memory for FFT computation
+        x = (complex double *)malloc(N * sizeof(complex double));
+        fk = (float *)malloc(N * sizeof(float));
+        Ak = (float *)malloc(N * sizeof(float));
+
+        // Copy audio samples to FFT input vector
+        for (int k = 0; k < N; k++) {
+            x[k] = sampleVector[k];
+        }
+
+        // Compute the FFT
+        fftCompute(x, N);
+        fftGetAmplitude(x, N, SAMP_FREQ, fk, Ak);
+
+        // Print frequency and amplitude values for debugging
+        for (int k = 0; k <= N/2; k++) {
+            printf("Frequency: %f Hz, Amplitude: %f\n", fk[k], Ak[k]);
+        }
+
+        // Free resources
+        free(x);
+        free(fk);
+        free(Ak);
+
+        sleep(1);  
+    }
+
+    return NULL;
 }
 
 
