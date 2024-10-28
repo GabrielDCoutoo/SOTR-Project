@@ -45,6 +45,22 @@ typedef struct {
     uint8_t last_write;
 } cab;
 
+typedef struct {
+    float detectedSpeedFrequency;
+    float detectedSpeed;
+} speedVars;
+
+typedef struct {
+    float maxIssueAmplitude;  // maximum amplitude of frequencies below 200Hz
+    float ratio;              // ratio to the max amplitude at other ranges
+} issueVars;
+
+typedef struct {
+    float lastAmplitude;
+    float lastFrequency;
+    int forwards;
+} directionVars;
+
 struct  timespec TsAdd(struct  timespec  ts1, struct  timespec  ts2);
 struct  timespec TsSub(struct  timespec  ts1, struct  timespec  ts2);
 
@@ -52,9 +68,12 @@ buffer cab_getWriteBuffer(cab* c);
 buffer cab_getReadBuffer(cab* c);
 void cab_releaseWriteBuffer(cab* c, uint8_t index);
 void cab_releaseReadBuffer(cab* c, uint8_t index);
-void usage(int argc, char* argv[]);
+void usage();
 void init_cab(cab *cab_obj);
 void audioRecordingCallback(void* userdata, Uint8* stream, int len);
 void filterLP(uint32_t cof, uint32_t sampleFreq, uint8_t * buffer, uint32_t nSamples);
+float frequency_to_speed(float frequency_hz);
+int detectDirection(float curAmplitude, float lastAmplitude, float curFrequency, float lastFrequency, float speed);
+float relativeDiff(float a, float b);
 
 #endif

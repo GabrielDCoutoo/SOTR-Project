@@ -4,10 +4,11 @@ Features:
 - LP FILTER
 - CAB Buffer
 - Tasks: Speed - 100ms ; Detect issues - 1s / Direction - 400ms?
-- RTDB - periodic display (50 ms?)
+- RTDB - periodic display (sporadic)
 - Structs for RTDB
-- fft display - 5s? (verificar se é uma tarefa muito pesada, aumentar/diminuir período de acordo)
+- fft display - 2s (verificar se é uma tarefa muito pesada, aumentar/diminuir período de acordo)
 
+Ordem de prioridades:
+- LP Filter < fft display < rtdb < speed < direction < issues
 
-
-crédito para o código do CAB - https://embedjournal.com/implementing-circular-buffer-embedded-c/
+crédito para o código do CAB - inspirado na implementação no livro de Butazzo

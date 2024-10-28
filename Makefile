@@ -3,7 +3,7 @@ SDL2_CONFIG = sdl2-config
 CFLAGS = $(shell $(SDL2_CONFIG) --cflags)
 LDFLAGS = $(shell $(SDL2_CONFIG) --libs)
 # Add other flags if necessary
-LDFLAGS += -lm  
+LDFLAGS += -lm -lrt -lpthread
 CFLAGS += -g
 
 TARGET = rtsounds

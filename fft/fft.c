@@ -10,6 +10,7 @@
 #ifndef FFT_H
 #define FFT_H
 #define __USE_MISC
+#define _GNU_SOURCE
 
 #include <stdio.h>
 #include <math.h>
