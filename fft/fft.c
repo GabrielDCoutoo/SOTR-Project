@@ -51,27 +51,44 @@ void fftCompute(complex double *X, int N) {
  * **********************************************************/
 void fftGetAmplitude(complex double * X, int N, int fs, float * fk, float * Ak) {
     
-    int k=0;
+//     int k=0;
     
-    /* Compute freqs: from 0/DC to fs, obver the N bins */
-    /* Output vector is mirrored, so only the first N/2 bins are relevant */
-    for(k=0; k<=N/2; k++) {
-		fk[k]=k*fs/N;		
-//		printf("fk[%d]=%f\n",k,fk[k]);
-	}
+//     /* Compute freqs: from 0/DC to fs, obver the N bins */
+//     /* Output vector is mirrored, so only the first N/2 bins are relevant */
+//     for(k=0; k<=N/2; k++) {
+// 		fk[k]=k*fs/N;		
+// //		printf("fk[%d]=%f\n",k,fk[k]);
+// 	}
     
-    /* Compute amplitudes */
-    Ak[0] = 1.0/N*cabsf(X[0]);
-    Ak[N/2] = 1.0/N*cabsf(X[N/2]);
-    for(k=1; k<N/2; k++) {
-		Ak[k] = 2.0/N*cabsf(X[k]);
-	}
+//     /* Compute amplitudes */
+//     Ak[0] = 1.0/N*cabsf(X[0]);
+//     Ak[N/2] = 1.0/N*cabsf(X[N/2]);
+//     for(k=1; k<N/2; k++) {
+// 		Ak[k] = 2.0/N*cabsf(X[k]);
+// 	}
 	
 //	 for(k=0; k<=N/2; k++) {	
 //		printf(">>fk[%d]=%f\n",k,fk[k]);
 //	}
 	
-	return;    
+	//return;
+
+    // Iterate over the first N/2 bins for frequency and amplitude calculation
+    for (int k = 0; k < N / 2; k++) {
+        fk[k] = (float)k * fs / N;            // Frequency calculation
+        Ak[k] = cabs(X[k]) * (2.0 / N);      // Amplitude calculation as magnitude, scaled
+
+        // Debugging: print frequency and amplitude to verify non-zero values
+        if (k < 5) {  // Limit the output to a sample of values
+            printf("Frequency: %f Hz, Amplitude: %f\n", fk[k], Ak[k]);
+        }
+    }
+    
+    // Handle the DC and Nyquist frequency (if applicable)
+    Ak[0] = cabs(X[0]) / N;                // DC component
+    if (N % 2 == 0) {
+        Ak[N / 2] = cabs(X[N / 2]) / N;  // Nyquist frequency component
+    }
 }
 
 /* ******************************************************

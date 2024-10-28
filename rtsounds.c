@@ -1,3 +1,6 @@
+#define _GNU_SOURCE             /* Must precede #include <sched.h> for sched_setaffinity */ 
+#define __USE_MISC
+
 #include "rtsounds.h"
 
 /* ***********************************************
@@ -12,8 +15,6 @@
 * Global variables
 * ***********************************************/
 cab cab_buffer;
-pthread_cond_t updatedVar;
-pthread_mutex_t updatedVarMutex;
 SDL_AudioDeviceID recordingDeviceId = 0; 	/* Structure with ID of recording device */
 Uint8 * gRecordingBuffer = NULL;
 int gRecordingDeviceCount = 0;
@@ -24,20 +25,11 @@ Uint32 gBufferByteSize = 0;
 const int MAX_RECORDING_DEVICES = 10;
 const int MAX_RECORDING_SECONDS = 5;
 const int RECORDING_BUFFER_SECONDS = MAX_RECORDING_SECONDS + 1;
+// Global variables for shared data between threads
+volatile float detectedSpeedFrequency = 0.0;  // Detected speed frequency, initially set to 0
+volatile float maxAmplitudeDetected = 0.0;    // Max amplitude for issue detection, initially set to 0
 
-// default periods:
-// audio - not periodic; activated by recording device
-// speed - 100 ms
-// issues - 1 s
-// direction - 400 ms
-// rt display - sporadic; activated by rt var changes
-// fft - 2 s
-int periods[4];			// save thread periods
-
-// Real time vars
-speedVars speedValues;
-issueVars issueValues;
-directionVars directionValues;
+int periods[6];			// save thread periods
 
 /* *************************
 * Audio recording / LP filter thread
@@ -61,7 +53,12 @@ void* Audio_thread(void* arg)
 			/* Lock callback. Prevents the following code to not concur with callback function */
 			SDL_LockAudioDevice(recordingDeviceId);
 
-			/* Receiving buffer full?Frequency(recordingDeviceId );
+			/* Receiving buffer full? */
+			if(gBufferBytePosition > gBufferByteMaxPosition)
+			{
+				/* Stop recording audio */
+				SDL_PauseAudioDevice(recordingDeviceId, SDL_TRUE );
+				SDL_UnlockAudioDevice(recordingDeviceId );
 				break;
 			}
 
@@ -82,26 +79,20 @@ void* Audio_thread(void* arg)
 * **************************/
 void* Speed_thread(void* arg)
 {
-	printf("Speed detection thread running\n");
-
-	usleep(THREAD_INIT_OFFSET);
-	struct timespec ts, // thread next activation time (absolute)
-				ta,             // activation time of current thread activation (absolute)
-				tit,            // thread time from last execution,
-				ta_ant,         // activation time of last instance (absolute),
-				tp;             // Thread period
-
-	int niter = 0;
-	tp.tv_sec = periods[0]/NS_IN_SEC;
-	tp.tv_nsec = periods[0]%NS_IN_SEC;
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	ts = TsAdd(ts,tp);
+     printf("Speed detection thread running\n");
     
-    int N = BUF_SIZE;  // Number of samples
+    // Assuming the buffer is already filled with audio data.
+    uint16_t * sampleVector = (uint16_t *)gRecordingBuffer; // Use the recording buffer as sample input
+    int N = 0;  // Number of samples
+    int sampleDurationMS = 100;  // Duration to analyze (100ms)
     float *fk;  // Array of frequencies
     float *Ak;  // Array of amplitudes for each frequency
     complex double *x;  // Array of complex values (samples and FFT output)
-	float maxAmplitude = 0;
+    
+    // Get the size for N (power of two)
+    for(N=1; pow(2,N) < (SAMP_FREQ*sampleDurationMS)/1000; N++);
+    N--;
+    N = (int)pow(2,N);  // Ensure N is a power of 2 for FFT
     
     printf("Number of samples is: %d\n", N);
     
@@ -110,48 +101,31 @@ void* Speed_thread(void* arg)
     fk = (float *)malloc(N * sizeof(float));
     Ak = (float *)malloc(N * sizeof(float));
     
-	while(1) {
-		/* Wait until next cycle */
-		clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME,&ts,NULL);
-		clock_gettime(CLOCK_MONOTONIC, &ta);            
-		ts = TsAdd(ts,tp);              
-		
-		niter++; // Count number of activations
-
-		// Get buffer
-		buffer b = cab_getReadBuffer(&cab_buffer);
-
-		// Copy buffer content
-		for (int i = 0; i < N; i++) {
-				x[i] = b.buf[i];
-		}
-
-		// Release buffer
-		cab_releaseReadBuffer(&cab_buffer, b.index);
-
-		// Compute the FFT
-		fftCompute(x, N);
-		
-		// Get the amplitude for each frequency
-		fftGetAmplitude(x, N, SAMP_FREQ, fk, Ak);
-		
-		// Find the most powerful frequency between 2 kHz and 5 kHz
-		for (int k = 0; k <= N/2; k++) {
-			if (fk[k] >= 2000 && fk[k] <= 5000) {
-				if (Ak[k] > maxAmplitude) {
-					maxAmplitude = Ak[k];
-					speedValues.detectedSpeedFrequency = fk[k];
-				}
-			}
-		}
-
-		speedValues.detectedSpeed = frequency_to_speed(speedValues.detectedSpeedFrequency);
-		
-		// Signal for display thread 
-		pthread_mutex_lock(&updatedVarMutex);
-		pthread_cond_signal(&updatedVar);
-		pthread_mutex_unlock(&updatedVarMutex);
-    }     
+    // Copy the samples to complex input vector
+    for (int k = 0; k < N; k++) {
+        x[k] = sampleVector[k];  // Copy real part only
+    }
+    
+    // Compute the FFT
+    fftCompute(x, N);
+    
+    // Get the amplitude for each frequency
+    fftGetAmplitude(x, N, SAMP_FREQ, fk, Ak);
+    
+    // Find the most powerful frequency between 2 kHz and 5 kHz
+    float maxAmplitude = 0;
+    float detectedFrequency = 0;
+    
+    for (int k = 0; k <= N/2; k++) {
+        if (fk[k] >= 2000 && fk[k] <= 5000) {
+            if (Ak[k] > maxAmplitude) {
+                maxAmplitude = Ak[k];
+                detectedFrequency = fk[k];
+            }
+        }
+    }
+    
+    printf("Detected speed frequency: %f Hz\n", detectedFrequency);
     
     // Free resources
     free(x);
@@ -159,6 +133,7 @@ void* Speed_thread(void* arg)
     free(Ak);
     
     return NULL;
+
 }
 
 
@@ -169,25 +144,17 @@ void* Issue_thread(void* arg) {
 
 	printf("Issue detection thread running\n");
     
-    usleep(THREAD_INIT_OFFSET);
-	struct timespec ts, // thread next activation time (absolute)
-				ta,             // activation time of current thread activation (absolute)
-				tit,            // thread time from last execution,
-				ta_ant,         // activation time of last instance (absolute),
-				tp;             // Thread period
-
-	int niter = 0;
-	tp.tv_sec = periods[1]/NS_IN_SEC;
-	tp.tv_nsec = periods[1]%NS_IN_SEC;
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	ts = TsAdd(ts,tp);
+    uint16_t * sampleVector = (uint16_t *)gRecordingBuffer;  // Use recording buffer
+    int N = 0;  // Number of samples
+    int sampleDurationMS = 100;  // Duration of the sample in ms
+    float *fk;  // Frequencies
+    float *Ak;  // Amplitudes
+    complex double *x;  // Complex array for FFT
     
-    int N = BUF_SIZE;  // Number of samples
-    float *fk;  // Array of frequencies
-    float *Ak;  // Array of amplitudes for each frequency
-    complex double *x;  // Array of complex values (samples and FFT output)
-	float maxAmplitude = 0;
-	float detectedFrequency = 0;
+    // Get the size for N (power of two)
+    for(N=1; pow(2,N) < (SAMP_FREQ*sampleDurationMS)/1000; N++);
+    N--;
+    N = (int)pow(2,N);
     
     printf("Number of samples for issue detection: %d\n", N);
     
@@ -196,48 +163,33 @@ void* Issue_thread(void* arg) {
     fk = (float *)malloc(N * sizeof(float));
     Ak = (float *)malloc(N * sizeof(float));
     
-	while (1) {
-		/* Wait until next cycle */
-		clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME,&ts,NULL);
-		clock_gettime(CLOCK_MONOTONIC, &ta);            
-		ts = TsAdd(ts,tp);              
-		
-		niter++; // Count number of activations
-
-		// Get buffer
-		buffer b = cab_getReadBuffer(&cab_buffer);
-
-		// Copy buffer content
-		for (int i = 0; i < N; i++) {
-				x[i] = b.buf[i];
-		}
-
-		// Release buffer
-		cab_releaseReadBuffer(&cab_buffer, b.index);
-
-		// Compute the FFT
-		fftCompute(x, N);
-		
-		// Get the amplitude for each frequency
-		fftGetAmplitude(x, N, SAMP_FREQ, fk, Ak);
-		
-		// Check for low-frequency components (<200 Hz) with amplitude > 20% of peak
-		for (int k = 0; k <= N/2; k++) {
-			if (fk[k] < 200) {
-				if (Ak[k] > issueValues.maxIssueAmplitude)
-					issueValues.maxIssueAmplitude = Ak[k];
-			}
-			if (Ak[k] > maxAmplitude)
-				maxAmplitude = Ak[k];
-		}
-
-		issueValues.ratio = issueValues.maxIssueAmplitude / maxAmplitude;
-
-		// Signal for display thread 
-		pthread_mutex_lock(&updatedVarMutex);
-		pthread_cond_signal(&updatedVar);
-		pthread_mutex_unlock(&updatedVarMutex);
-	}
+    // Copy the samples to complex input vector
+    for (int k = 0; k < N; k++) {
+        x[k] = sampleVector[k];  // Real part only
+    }
+    
+    // Compute FFT
+    fftCompute(x, N);
+    
+    // Get amplitude for each frequency
+    fftGetAmplitude(x, N, SAMP_FREQ, fk, Ak);
+    
+    // Find the peak frequency and amplitude
+    float maxAmplitude = 0;
+    float peakFrequency = 0;
+    for (int k = 0; k <= N/2; k++) {
+        if (Ak[k] > maxAmplitude) {
+            maxAmplitude = Ak[k];
+            peakFrequency = fk[k];
+        }
+    }
+    
+    // Check for low-frequency components (<200 Hz) with amplitude > 20% of peak
+    for (int k = 0; k <= N/2; k++) {
+        if (fk[k] < 200 && Ak[k] > 0.2 * maxAmplitude) {
+            printf("Potential bearing issue detected at frequency: %f Hz with amplitude: %f\n", fk[k], Ak[k]);
+        }
+    }
     
     // Free resources
     free(x);
@@ -252,123 +204,45 @@ void* Issue_thread(void* arg) {
 * **************************/
 void* Direction_thread(void* arg)
 {
-	printf("Direction detection thread running\n");
-    
-    usleep(THREAD_INIT_OFFSET);
-	struct timespec ts, // thread next activation time (absolute)
-				ta,             // activation time of current thread activation (absolute)
-				tit,            // thread time from last execution,
-				ta_ant,         // activation time of last instance (absolute),
-				tp;             // Thread period
 
-	int niter = 0;
-	tp.tv_sec = periods[2]/NS_IN_SEC;
-	tp.tv_nsec = periods[2]%NS_IN_SEC;
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	ts = TsAdd(ts,tp);
-    
-    int N = BUF_SIZE;  // Number of samples
-    float *fk;  // Array of frequencies
-    float *Ak;  // Array of amplitudes for each frequency
-    complex double *x;  // Array of complex values (samples and FFT output)
-	float maxAmplitude = 0;
-	float detectedFrequency = 0;
-    
-    printf("Number of samples for issue detection: %d\n", N);
-    
-    // Allocate memory
-    x = (complex double *)malloc(N * sizeof(complex double));
-    fk = (float *)malloc(N * sizeof(float));
-    Ak = (float *)malloc(N * sizeof(float));
-    
-	while(1) {
-		/* Wait until next cycle */
-		clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME,&ts,NULL);
-		clock_gettime(CLOCK_MONOTONIC, &ta);            
-		ts = TsAdd(ts,tp);              
-		
-		niter++; // Count number of activations
-
-		// Get buffer
-		buffer b = cab_getReadBuffer(&cab_buffer);
-
-		// Copy buffer content
-		for (int i = 0; i < N; i++) {
-				x[i] = b.buf[i];
-		}
-
-		// Release buffer
-		cab_releaseReadBuffer(&cab_buffer, b.index);
-
-		// Compute the FFT
-		fftCompute(x, N);
-		
-		// Get the amplitude for each frequency
-		fftGetAmplitude(x, N, SAMP_FREQ, fk, Ak);
-		
-		// Find the most powerful frequency between 2 kHz and 5 kHz
-		for (int k = 0; k <= N/2; k++) {
-			if (fk[k] >= 2000 && fk[k] <= 5000) {
-				if (Ak[k] > maxAmplitude) {
-					maxAmplitude = Ak[k];
-					detectedFrequency = fk[k];
-				}
-			}
-		}
-
-		// Get direction
-		directionValues.forwards = detectDirection(maxAmplitude, directionValues.lastAmplitude, detectedFrequency,
-											       directionValues.lastFrequency, speedValues.detectedSpeed);
-
-		// Update vars
-		directionValues.lastAmplitude = maxAmplitude;
-		directionValues.lastFrequency = detectedFrequency;
-
-		// Signal for display thread 
-		pthread_mutex_lock(&updatedVarMutex);
-		pthread_cond_signal(&updatedVar);
-		pthread_mutex_unlock(&updatedVarMutex);
-	}    
-    
-    // Free resources
-    free(x);
-    free(fk);
-    free(Ak);
-    
-    return NULL;
 }
 
 /* *************************
 * RT values display thread
 * **************************/
-void* Display_thread(void* arg)
-{
+void* Display_thread(void* arg) {
+    printf("Displaying real-time values...\n");
+
     while (1) {
-		// Wait for any RT var to be updated
-		pthread_mutex_lock(&updatedVarMutex);
-		pthread_cond_wait(&updatedVar, &updatedVarMutex);
-		pthread_mutex_unlock(&updatedVarMutex);
+        // Directly access the global variables without declaring them as extern
+        printf("Detected speed frequency: %f Hz\n", detectedSpeedFrequency);
+        printf("Max amplitude (for issues): %f\n", maxAmplitudeDetected);
 
-		printf("Displaying real-time values...\n");
-
-        printf("Detected speed frequency: %f Hz\n", speedValues.detectedSpeedFrequency);
-		printf("Calculated speed: %f Hz\n", speedValues.detectedSpeed);
-        
-		printf("Max amplitude (for issues): %f\t ratio: %f\n", issueValues.maxIssueAmplitude, issueValues.ratio);
-		if (issueValues.ratio > 0.2)
-			printf("Warning: potential issue detected\n");
-		else
-			printf("No issues detected\n");
-
-		if (directionValues.forwards)
-			printf("Detected direction: forwards\n");
-		else
-			printf("Detected direction: backwards\n");
+        sleep(1);  // Adjust based on how often you want to update the display
     }
 
     return NULL;
 }
-
+// Function to plot frequency and amplitude using GNUplot
+void plot_frequency_amplitude(float *fk, float *Ak, int size) {
+    FILE *gnuplotPipe = popen("gnuplot -persistent", "w");
+    if (gnuplotPipe) {
+        fprintf(gnuplotPipe, "set title 'Frequency vs Amplitude'\n");
+        fprintf(gnuplotPipe, "set xlabel 'Frequency (Hz)'\n");
+        fprintf(gnuplotPipe, "set ylabel 'Amplitude'\n");
+        fprintf(gnuplotPipe, "plot '-' with linespoints title 'Amplitude'\n");
+        
+        for (int i = 0; i < size; i++) {
+            fprintf(gnuplotPipe, "%f %f\n", fk[i], Ak[i]);
+        }
+        fprintf(gnuplotPipe, "e\n"); // End of data
+        
+        fflush(gnuplotPipe);
+        pclose(gnuplotPipe);
+    } else {
+        printf("Error opening gnuplot pipe.\n");
+    }
+}
 /* *************************
 * FFT thread
 * **************************/
@@ -376,70 +250,46 @@ void* FFT_thread(void* arg)
 {
 	printf("FFT thread running\n");
 
-	usleep(THREAD_INIT_OFFSET);
-	struct timespec ts, // thread next activation time (absolute)
-				ta,             // activation time of current thread activation (absolute)
-				tit,            // thread time from last execution,
-				ta_ant,         // activation time of last instance (absolute),
-				tp;             // Thread period
-
-	int niter = 0;
-	tp.tv_sec = periods[3]/NS_IN_SEC;
-	tp.tv_nsec = periods[3]%NS_IN_SEC;
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	ts = TsAdd(ts,tp);
-    
-    int N = BUF_SIZE;  // Number of samples
-    float *fk;  // Array of frequencies
-    float *Ak;  // Array of amplitudes for each frequency
-    complex double *x;  // Array of complex values (samples and FFT output)
-
-    printf("Number of samples is: %d\n", N);
-    
-    // Allocate memory for FFT
-    x = (complex double *)malloc(N * sizeof(complex double));
-    fk = (float *)malloc(N * sizeof(float));
-    Ak = (float *)malloc(N * sizeof(float));
-
     while (1) {
-		/* Wait until next cycle */
-		clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME,&ts,NULL);
-		clock_gettime(CLOCK_MONOTONIC, &ta);            
-		ts = TsAdd(ts,tp);              
-		
-		niter++; // Count number of activations
+        uint16_t * sampleVector = (uint16_t *)gRecordingBuffer;  // Use your audio buffer
+        int N = 0;  // Number of samples
+        int sampleDurationMS = 100;  // Sample duration (e.g., 100 ms)
+        float *fk;  // Frequencies array
+        float *Ak;  // Amplitudes array
+        complex double *x;  // FFT complex array
 
-		// Get buffer
-		buffer b = cab_getReadBuffer(&cab_buffer);
+        // Ensure N is a power of two
+        for(N=1; pow(2,N) < (SAMP_FREQ*sampleDurationMS)/1000; N++);
+        N--;
+        N = (int)pow(2,N);
 
-		// Copy buffer content
-		for (int i = 0; i < N; i++) {
-				x[i] = b.buf[i];
-		}
+        // Allocate memory for FFT computation
+        x = (complex double *)malloc(N * sizeof(complex double));
+        fk = (float *)malloc(N * sizeof(float));
+        Ak = (float *)malloc(N * sizeof(float));
 
-		// Release buffer
-		cab_releaseReadBuffer(&cab_buffer, b.index);
-
-		// Compute the FFT
-		fftCompute(x, N);
-		
-		// Get the amplitude for each frequency
-		fftGetAmplitude(x, N, SAMP_FREQ, fk, Ak);
-
-        // Print frequency and amplitude values for debugging
-        for (int k = 0; k <= N/2; k++) {
-            printf("Frequency: %f Hz, Amplitude: %f\n", fk[k], Ak[k]);
+        // Copy audio samples to FFT input vector
+        for (int k = 0; k < N; k++) {
+            x[k] = sampleVector[k];
         }
-		
-		// TODO: display fft graphically
-	}
 
-	// Free resources
-	free(x);
-	free(fk);
-	free(Ak);
+        // Compute the FFT
+        fftCompute(x, N);
+        fftGetAmplitude(x, N, SAMP_FREQ, fk, Ak);
 
-	sleep(1);  
+        // // Print frequency and amplitude values for debugging
+        // for (int k = 0; k <= N/2; k++) {
+        //     printf("Frequency: %f Hz, Amplitude: %f\n", fk[k], Ak[k]);
+        // }
+		plot_frequency_amplitude(fk, Ak, N / 2);
+
+        // Free resources
+        free(x);
+        free(fk);
+        free(Ak);
+
+        sleep(1);  
+    }
 
     return NULL;
 }
@@ -457,7 +307,7 @@ int main(int argc, char *argv[]) {
     unsigned char* procname4 = "DirectionThread";
 	unsigned char* procname5 = "DisplayThread";
 	unsigned char* procname6 = "FFTThread";
-	int idx = 1;
+	int idx = 2;
 	int priorities[6];
 
 	// Sound vars
@@ -465,7 +315,7 @@ int main(int argc, char *argv[]) {
 	int index;									/* Device index used to browse audio devices */
 	int bytesPerSample;							/* Number of bytes each sample requires. Function of size of sample and # of channels */ 
 	int bytesPerSecond;							/* Intuitive. bytes per sample sample * sampling frequency */
-	printf("debug");
+
 	// Check args
 	if (argc > 1) {
 		// -prio selected
@@ -475,38 +325,23 @@ int main(int argc, char *argv[]) {
 				if (priorities[i] == 0) {
 					fprintf(stderr, "Error in arg %s\n", argv[idx]);
 					usage(argc, argv);
-					return 1;
 				}
 			}
 		} else {
-			priorities[0] = 10;		// Audio - lowest prio
-			priorities[1] = 40;		// Speed
-			priorities[2] = 60;		// Issues
-			priorities[3] = 50;		// Direction
-			priorities[4] = 30;		// RT vars display
-			priorities[5] = 20;		// FFT display
+			for (int i = 0; i < 6; i++) {
+				priorities[i] = DEFAULT_PRIO;
+			}
 		}
 
 		// -period selected
 		if (strcmp(argv[idx++], "-period") == 0) {
-			for(int i = 0; i < 4; i++, idx++) {
+			for(int i = 0; i < 6; i++, idx++) {
 				periods[i] = atoi(argv[idx]);
 				if (periods[i] == 0) {
 					fprintf(stderr, "Error in arg %s\n", argv[idx]);
-					usage();
-					return 1;
+					usage(argc, argv);
 				}
 			}
-		} else {
-			periods[0] = 100*1000*1000;		// 100 ms
-			periods[1] = 1000*1000*1000;	// 1 s
-			periods[2] = 400*1000*1000;		// 400 ms
-			periods[3] = 2000*1000*1000;	// 2 s
-		}
-
-		if (idx < argc) {
-			fprintf(stderr, "Error in arg %s\n", argv[idx]);
-			usage();
 		}
 	}
 	
@@ -598,37 +433,37 @@ int main(int argc, char *argv[]) {
     pthread_attr_init(&attr1);
 	pthread_attr_setinheritsched(&attr1, PTHREAD_EXPLICIT_SCHED);
 	pthread_attr_setschedpolicy(&attr1, SCHED_FIFO);
-    parm1.sched_priority = priorities[0];
+    parm1.sched_priority = DEFAULT_PRIO;
     pthread_attr_setschedparam(&attr1, &parm1);
 
     pthread_attr_init(&attr2);
 	pthread_attr_setinheritsched(&attr2, PTHREAD_EXPLICIT_SCHED);
 	pthread_attr_setschedpolicy(&attr2, SCHED_FIFO);
-    parm2.sched_priority = priorities[1];
+    parm2.sched_priority = DEFAULT_PRIO;
     pthread_attr_setschedparam(&attr2, &parm2);
 
     pthread_attr_init(&attr3);
 	pthread_attr_setinheritsched(&attr3, PTHREAD_EXPLICIT_SCHED);
 	pthread_attr_setschedpolicy(&attr3, SCHED_FIFO);
-    parm3.sched_priority = priorities[2];
+    parm3.sched_priority = DEFAULT_PRIO;
     pthread_attr_setschedparam(&attr3, &parm3);
 
     pthread_attr_init(&attr4);
 	pthread_attr_setinheritsched(&attr4, PTHREAD_EXPLICIT_SCHED);
 	pthread_attr_setschedpolicy(&attr4, SCHED_FIFO);
-    parm4.sched_priority = priorities[3];
+    parm4.sched_priority = DEFAULT_PRIO;
     pthread_attr_setschedparam(&attr4, &parm4);
 
     pthread_attr_init(&attr5);
 	pthread_attr_setinheritsched(&attr5, PTHREAD_EXPLICIT_SCHED);
 	pthread_attr_setschedpolicy(&attr5, SCHED_FIFO);
-    parm5.sched_priority = priorities[4];
+    parm5.sched_priority = DEFAULT_PRIO;
     pthread_attr_setschedparam(&attr5, &parm5);
 
     pthread_attr_init(&attr6);
 	pthread_attr_setinheritsched(&attr6, PTHREAD_EXPLICIT_SCHED);
 	pthread_attr_setschedpolicy(&attr6, SCHED_FIFO);
-    parm6.sched_priority = priorities[5];
+    parm6.sched_priority = DEFAULT_PRIO;
     pthread_attr_setschedparam(&attr6, &parm6);
 
 	
@@ -768,7 +603,7 @@ void audioRecordingCallback(void* userdata, uint16_t* stream, int len )
     cab.head = newWritePos;
 } */
 
-void usage() {
+void usage(int argc, char* argv[]) {
     printf("Usage: ./rtsounds [-prio LPPrio SpeedPrio IssuePrio DirectionPrio DisplayPrio RTPrio]\n[-period LPP SpeedP IssueP DirectionP DisplayP RTP]\n[audioDevice]\n");
 }
 
@@ -830,47 +665,3 @@ void filterLP(uint32_t cof, uint32_t sampleFreq, uint8_t * buffer, uint32_t nSam
 	
 	return;
 }
-
-float frequency_to_speed(float frequency_hz) {
-    // Define frequency and speed bounds
-    float min_freq = 2000.0, max_freq = 5000.0;  // Frequency range in Hz
-    float min_speed = 20.0, max_speed = 120.0;   // Speed range in km/h
-    
-    // Constrain frequency within bounds for realism
-    if (frequency_hz < min_freq) {
-        frequency_hz = min_freq;
-    } else if (frequency_hz > max_freq) {
-        frequency_hz = max_freq;
-    }
-    
-    // Linear interpolation to map frequency to speed
-    float speed_kmh = min_speed + (frequency_hz - min_freq) * (max_speed - min_speed) / (max_freq - min_freq);
-    
-    return speed_kmh;
-}
-
-// 1 -> forwards; 0 -> backwards
-// Conditions:
-//   speed > 40 -> forwards
-//   increasing frequency && increasing amplitude -> forwards
-//   decreasing or same frequency && low amplitude variation -> backwards
-int detectDirection(float curAmplitude, float lastAmplitude, float curFrequency, float lastFrequency, float speed) {
-	if (speed > 40)
-		return 1;
-	if (curFrequency > lastFrequency) {
-		if (curAmplitude > lastAmplitude)
-			return 1;
-	} else {
-		if (relativeDiff(curAmplitude, lastAmplitude) < 0.05)
-			return 0;
-	}
-	return 1;
-}
-
-float relativeDiff(float a, float b) {
-	if (a >= b) {
-		return a/b - 1;
-	}
-	return b/a - 1;
-}
-
