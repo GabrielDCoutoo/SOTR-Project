@@ -41,7 +41,7 @@ typedef struct {
 } buffer;
 
 typedef struct {
-    buffer buflist[NTASKS+1];
+    buffer* buflist[NTASKS+1];
     uint8_t last_write;
 } cab;
 
@@ -64,8 +64,8 @@ typedef struct {
 struct  timespec TsAdd(struct  timespec  ts1, struct  timespec  ts2);
 struct  timespec TsSub(struct  timespec  ts1, struct  timespec  ts2);
 
-buffer cab_getWriteBuffer(cab* c);
-buffer cab_getReadBuffer(cab* c);
+buffer* cab_getWriteBuffer(cab* c);
+buffer* cab_getReadBuffer(cab* c);
 void cab_releaseWriteBuffer(cab* c, uint8_t index);
 void cab_releaseReadBuffer(cab* c, uint8_t index);
 void usage();
