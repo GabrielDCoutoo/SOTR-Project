@@ -1,32 +1,33 @@
-# Get compile/link flags from sdl2-config to assure portability
+LIBS = -lSDL2
+
 SDL2_CONFIG = sdl2-config
-CFLAGS = $(shell $(SDL2_CONFIG) --cflags)
-LDFLAGS = $(shell $(SDL2_CONFIG) --libs)
-# Add other flags if necessary
-LDFLAGS += -lm -lrt -lpthread
+CFLAGS = $(shell $(SDL2_CONFIG) --cflags) -D_REENTRANT
+LDFLAGS = $(shell $(SDL2_CONFIG) --libs) -lm -lrt -lpthread
 CFLAGS += -g
 
+# Sources and target
 TARGET = rtsounds
-OBJECTS = rtsounds.o ./fft/fft.o
+OBJECTS = rtsounds.o fft/fft.o
 
-CC=gcc
+# Compiler
+CC = gcc
 
+# Default target
 all: $(TARGET)
 
-$(TARGET): $(OBJECTS) 
-	$(CC) -o $(TARGET) $(OBJECTS)  $(LDFLAGS) 
-	
-%.o:%.c
-	$(CC) $(CFLAGS) -c $< -o $@ 
+# Linking the target
+$(TARGET): $(OBJECTS)
+	$(CC) -o $(TARGET) $(OBJECTS) $(LDFLAGS)
 
+# Compile source files into object files
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Clean up build files
 clean:
-	rm -f *.o $(TARGET) $(OBJECTS)
+	rm -f $(OBJECTS) $(TARGET)
 
+# Run target
 run: $(TARGET)
 	clear
-	./$(TARGET) 1
-
-# Some notes
-# $@ represents the left side of the ":"
-# $^ represents the right side of the ":"
-# $< represents the first item in the dependency list   
+	./$(TARGET)

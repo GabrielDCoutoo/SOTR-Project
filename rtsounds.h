@@ -5,15 +5,17 @@
 
 /* App specific defines */
 #define NS_IN_SEC 1000000000L
-#define DEFAULT_PRIO 50				// Default (fixed) thread priority  
+#define DEFAULT_PRIO 50            // Default (fixed) thread priority  
 #define BUF_SIZE 4096
 #define NTASKS 6
-#define THREAD_INIT_OFFSET 1000000	// Initial offset (i.e. delay) of rt thread
-#define MONO 1 					/* Sample and play in mono (1 channel) */
-#define SAMP_FREQ 44100			/* Sampling frequency used by audio device */
-#define FORMAT AUDIO_U16		/* Format of each sample (signed, unsigned, 8,16 bits, int/float, ...) */
-#define ABUFSIZE_SAMPLES 4096	/* Audio buffer size in sample FRAMES (total samples divided by channel count) */
+#define THREAD_INIT_OFFSET 1000000 // Initial offset (i.e. delay) of rt thread
+#define MONO 1                     /* Sample and play in mono (1 channel) */
+#define SAMP_FREQ 44100            /* Sampling frequency used by audio device */
+#define FORMAT AUDIO_U16           /* Format of each sample (signed, unsigned, 8,16 bits, int/float, ...) */
+#define ABUFSIZE_SAMPLES 4096      /* Audio buffer size in sample FRAMES (total samples divided by channel count) */
 #define COF 10000
+#define MAX_RECORDING_SECONDS 10   /* Maximum recording duration */
+#define RECORDING_BUFFER_SECONDS (MAX_RECORDING_SECONDS + 1) /* Buffer size with padding */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,31 +38,34 @@
 typedef struct {
     uint16_t buf[BUF_SIZE];
     uint8_t nusers;
-	uint8_t index;
-	pthread_mutex_t bufMutex;
+    uint8_t index;
+    pthread_mutex_t bufMutex;
 } buffer;
 
 typedef struct {
-    buffer* buflist[NTASKS+1];
+    buffer buflist[NTASKS+1];
     uint8_t last_write;
 } cab;
 
-typedef struct {
-    float detectedSpeedFrequency;
-    float detectedSpeed;
-} speedVars;
 
 typedef struct {
     float maxIssueAmplitude;  // maximum amplitude of frequencies below 200Hz
     float ratio;              // ratio to the max amplitude at other ranges
 } issueVars;
 
+// Estruturas globais necessárias
 typedef struct {
+    float forwards;
     float lastAmplitude;
     float lastFrequency;
-    int forwards;
-} directionVars;
+} DirectionValues;
 
+typedef struct {
+    float detectedSpeed;
+} SpeedValues;
+
+DirectionValues directionValues = {0.0, 0.0, 0.0};
+SpeedValues speedValues = {0.0};
 struct  timespec TsAdd(struct  timespec  ts1, struct  timespec  ts2);
 struct  timespec TsSub(struct  timespec  ts1, struct  timespec  ts2);
 
